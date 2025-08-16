@@ -1,0 +1,81 @@
+import cv2
+import os
+from picamera2 import Picamera2
+
+# Constants
+COUNT_LIMIT = 30
+POS = (30, 60)  # top-left position for text overlay
+FONT = cv2.FONT_HERSHEY_COMPLEX  # font type for text overlay
+HEIGHT = 1.5  # font scale
+TEXTCOLOR = (0, 0, 255)  # BGR - RED
+BOXCOLOR = (255, 0, 255)  # BGR - BLUE
+WEIGHT = 3  # font thickness
+FACE_DETECTOR = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+
+# Input the user ID for face labeling
+face_id = input('\n----Enter User-id and press <return>----')
+print("\n [INFO] Initializing face capture. Look at the camera and wait!")
+
+# Create an instance of the PiCamera2 object
+cam = Picamera2()
+
+# Set the resolution of the camera preview
+cam.preview_configuration.main.size = (640, 360)
+cam.preview_configuration.main.format = "RGB888"
+cam.preview_configuration.controls.FrameRate = 30
+cam.preview_configuration.align()
+cam.configure("preview")
+cam.start()
+
+count = 0
+
+while True:
+    # Capture a frame from the camera
+    frame = cam.capture_array()
+
+    # Display count of images taken
+    cv2.putText(frame, 'Count:' + str(int(count)), POS, FONT, HEIGHT, TEXTCOLOR, WEIGHT)
+
+    # Convert frame from BGR to grayscale for face detection
+    frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detect faces in the grayscale frame
+    faces = FACE_DETECTOR.detectMultiScale(
+        frame_gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(30, 30)
+    )
+
+    for (x, y, w, h) in faces:
+        # Draw a bounding box around the detected face
+        cv2.rectangle(frame, (x, y), (x + w, y + h), BOXCOLOR, 3)
+
+        # Increment count for face samples
+        count += 1
+
+        # Create dataset folder if it doesn't exist
+        if not os.path.exists("dataset"):
+            os.makedirs("dataset")
+
+        # Save the captured face region into the dataset folder
+        file_path = os.path.join("dataset", f"User.{face_id}.{count}.jpg")
+        cv2.imwrite(file_path, frame_gray[y:y + h, x:x + w])
+
+        # Display a message when an image is saved
+        cv2.putText(frame, 'Saved:' + str(count), (x, y - 10), FONT, 0.7, TEXTCOLOR, 2)
+
+    # Display the frame with bounding boxes
+    cv2.imshow('Face Capture', frame)
+
+    # Exit condition if ESCAPE key is pressed or count reaches limit
+    key = cv2.waitKey(1) & 0xFF
+    if key == 27 or key == ord('q'):  # ESC or 'q' key to exit
+        break
+    elif count >= COUNT_LIMIT:  # Stop after capturing COUNT_LIMIT images
+        break
+
+# Clean up resources
+print("\n [INFO] Exiting Program and cleaning up stuff")
+cam.stop()
+cv2.destroyAllWindows()
