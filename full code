@@ -1,0 +1,321 @@
+import cv2
+import os
+from picamera2 import Picamera2
+import random
+import speech_recognition as sr
+import pyttsx3
+import pywhatkit
+import datetime
+import subprocess
+import RPi.GPIO as GPIO
+from time import sleep
+in1 = 11
+
+GPIO.setmode(GPIO.BOARD)
+GPIO.setwarnings(False)
+GPIO.setup(in1, GPIO.OUT)
+GPIO.output(in1, True)
+
+
+# Constants
+COUNT_LIMIT = 30
+POS = (30, 60)
+FONT = cv2.FONT_HERSHEY_COMPLEX
+HEIGHT = 1.5
+TEXTCOLOR = (0, 0, 255)
+BOXCOLOR = (255, 0, 255)
+WEIGHT = 3
+CASCADE_PATH = '/home/pi/Downloads/haarcascade_frontalface_default.xml'  # Replace with your path
+
+# Load the Haar Cascade for face detection
+face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+
+# Check if the cascade classifier loaded successfully
+if face_cascade.empty():
+    print("Error: Unable to load the face cascade classifier.")
+    exit()
+
+# Function to load known faces from dataset
+def load_known_faces(dataset_path):
+    known_faces = []
+    known_names = []
+   
+    for root, dirs, files in os.walk(dataset_path):
+        for file in files:
+            if file.endswith(".jpg") or file.endswith(".png"):
+                image_path = os.path.join(root, file)
+                name = os.path.basename(root)  # Assume directory name is the person's name
+                known_faces.append(cv2.imread(image_path, cv2.IMREAD_GRAYSCALE))
+                known_names.append(name)
+   
+    return known_faces, known_names
+
+# Create an instance of the PiCamera2 object
+cam = Picamera2()
+
+# Set the resolution of the camera preview
+cam.preview_configuration.main.size = (640, 360)
+cam.preview_configuration.main.format = "RGB888"
+cam.preview_configuration.controls.FrameRate = 30
+cam.preview_configuration.align()
+cam.configure("preview")
+cam.start()
+
+# Load known faces and their names from dataset
+dataset_path = "dataset"  # Replace with your dataset path
+known_faces, known_names = load_known_faces(dataset_path)
+
+count = 0
+
+while True:
+    frame = cam.capture_array()
+    cv2.putText(frame, 'Count:' + str(int(count)), POS, FONT, HEIGHT, TEXTCOLOR, WEIGHT)
+
+    # Convert frame to grayscale for face detection
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detect faces in the frame
+    faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+    for (x, y, w, h) in faces:
+        # Extract the face region from the frame
+        face_roi = gray_frame[y:y+h, x:x+w]
+
+        # Perform face recognition (simple matching example)
+        recognized = False
+        for known_face, name in zip(known_faces, known_names):
+            # Compare histograms as a simple example (you can use other methods)
+            similarity = cv2.compareHist(cv2.calcHist([face_roi], [0], None, [256], [0, 256]),
+                                         cv2.calcHist([known_face], [0], None, [256], [0, 256]),
+                                         cv2.HISTCMP_CORREL)
+
+            if similarity > 0.7:  # Adjust threshold based on your dataset
+                recognized = True
+                cv2.putText(frame, name, (x, y - 10), FONT, HEIGHT, TEXTCOLOR, WEIGHT)
+                break
+       
+        # Draw rectangle around the face
+        color = TEXTCOLOR if recognized else BOXCOLOR
+        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+       
+        # Print whether the face was recognized or not
+        status = "Recognized" if recognized else "Unknown"
+        if status=="Recognized":
+            listener = sr.Recognizer()
+            engine = pyttsx3.init()
+            voices = engine.getProperty('voices')
+
+            # Choose a valid voice index (use 0 if 12 is out of range)
+            voice_index = 12 if len(voices) > 12 else 0
+            engine.setProperty('voice', voices[voice_index].id)
+
+            # Adjust voice speed (rate) here (default rate is 200)
+            engine.setProperty('rate', 150)
+
+            # Function to speak the given text
+            def talk(text):
+                engine.say(text)
+                engine.runAndWait()
+
+            # Function to listen and return the recognized command
+            def take_command():
+                command = ""
+                try:
+                    with sr.Microphone() as source:
+                        print('Listening...')
+                        listener.adjust_for_ambient_noise(source)
+                        voice = listener.listen(source, timeout=10)
+                        command = listener.recognize_google(voice)
+                        command = command.lower()
+                        if 'alexa' in command:
+                           
+                            print(f"Recognized command: {command}")
+                except sr.UnknownValueError:
+                    print("Could not understand the audio")
+                except sr.RequestError as e:
+                    print(f"Error fetching results; {e}")
+                except Exception as e:
+                    print(f"Unexpected error occurred; {e}")
+                return command
+
+            # Function to process the recognized command
+            def process_command(command):
+                print(f"Processing command: {command}")
+
+                if  'hello siri' in command:
+                    talk('hi, how are you?')
+                    print('hi, how are you?')
+                elif 'hi siri' in command:
+                    talk('hi,how are you?')
+                    print('hi,how are you?')
+                elif 'what about you' in command :
+                    talk("I'm fine, how can I help you?")
+                    print("I'm fine, how can I help you?")
+                elif 'how are you' in command:
+                    talk("I'm fine, how can I help you?")
+                    print("I'm fine, how can I help you?")
+                elif 'what is your name' in command :
+                    talk('My name is siri')
+                    print("My name is siri")
+                elif 'who are you' in command:
+                    talk('My name is siri')
+                    print("My name is siri")
+                elif 'quit' in command:
+                    talk('Goodbye!')
+                    return True
+                elif 'break' in command:
+                    talk('goodbye')
+                    return True
+                elif 'exit' in command:
+                    talk('goodbye')
+                    return True
+                elif 'stop' in command:
+                    talk('goodbye')
+                    return True
+                elif 'play' in command:
+                    song = command.replace('play', '').strip()
+                    talk(f'Playing {song}')
+                    pywhatkit.playonyt(song)
+                elif 'open' in command:
+                    if 'chromium' in command:
+                        subprocess.Popen(['chromium-browser'])
+                        talk('Opening browser')
+                    elif 'file manager' in command:
+                        subprocess.Popen(['pcmanfm'])
+                        talk('Opening file manager')
+                    elif 'vlc' in command:
+                        subprocess.Popen(['vlc'])
+                        talk('Opening VLC')
+                    elif 'terminal' in command:
+                        subprocess.Popen(['lxterminal'])
+                        talk('Opening terminal')
+                    elif 'youtube' in command:
+                        talk('opening youtube')
+                        pywhatkit.search("https://www.youtube.com")
+                    elif 'new tab' in command:
+                        command='open'
+                        info=command.replace('open','').replace('new','').replace('tab','')
+                        talk('opening new tab')
+                        print('opening new tab')
+                        pywhatkit.search(info)
+                    else:
+                        app = command.replace('open', '').strip()
+                        talk(f'Opening {app}')
+                        pywhatkit.search(app)
+
+                elif "today's date" in command:
+                    date = datetime.datetime.now().strftime('%d/%m/%y')
+                    talk(f"Today's date is {date}")
+                    print(date)
+                elif 'time' in command :
+                    time = datetime.datetime.now().strftime('%I:%M %p')
+                    talk(f'Current time is {time}')
+                    print(time)
+                elif 'turn on light' in command:
+                    talk('turning light on')
+                    GPIO.output(in1, False)
+                elif 'turn off light' in command:
+                    talk('turning light off')
+                    GPIO.output(in1, True)
+                   
+                elif 'joke' in command:
+                           
+                    l=["What's the best thing about Switzerland? The flag is a big plus.",
+                    "I went to the aquarium this weekend, but I didn’t stay long. There’s something fishy about that place.",
+                    "I found a lion in my closet the other day! When I asked what it was doing there, it said 'Narnia business.'",
+                    "What's a cat's favorite instrument? Purr-cussion.",
+                    "Why did the snail paint a giant S on his car? So when he drove by, people could say: 'Look at that S car go!'",
+                    "What do you call a happy cowboy? A jolly rancher.",
+                    "What subject do cats like best in school? Hiss-tory.",
+                    "Humpty Dumpty had a great fall. He said his summer was pretty good too.",
+                    "My boss said 'dress for the job you want, not for the job you have'. So I went in as Batman.",
+                    "How do you make holy water? You boil the hell out of it.",
+                    "Justice is a dish best served cold. Otherwise, it's just water.",
+                    "Why should you never throw grandpa's false teeth at a vehicle? You might denture car.",
+                    "Why are Christmas trees bad at knitting? They always drop their needles.",
+                    "What did the lunch box say to the refrigerator? Don't hate me because I'm a little cooler.",
+                    "I can always tell when someone is lying. I can tell when they're standing too.",
+                    "Some people pick their nose, but I was born with mine."]
+                    r=random.randint(0,len(l)-1)
+                    f=l[r]
+                    talk("here's a silly joke for you")
+                    print(f)
+                    talk(f)        
+                elif 'who is' in command :
+                    search_term = command.replace('who is', '').strip()
+                    talk(f'Searching for {search_term}')
+                    pywhatkit.search(search_term)
+                elif 'what is' in command:
+                    s=command.replace('what is','')
+                    talk(f'searching for{s}')
+                    pywhatkit.search(s)
+                elif 'search' in command:
+                    s=command.replace('search','')
+                    talk(f'searching for{s}')
+                    pywhatkit.search(s)
+                elif 'tell me' in command:
+                    s=command.replace('tell me','')
+                    talk(f'searching for{s}')
+                    pywhatkit.search(s)
+                elif 'suggest' in command:
+                    s=command.replace('suggest','')
+                    talk(f'searching for{s}')
+                    pywhatkit.search(s)
+                elif 'how' in command:
+                    s=command
+                    talk(f'searching for{s}')
+                    pywhatkit.search(s)
+                elif 'where' in command:
+                    s=command
+                    talk(f'searching for{s}')
+                    pywhatkit.search(s)
+                elif 'close terminal' in command:
+                    subprocess.Popen(['pkill', 'lxterminal'])
+                    talk('Closing terminal')
+                elif 'close vlc' in command:
+                    subprocess.Popen(['pkill', 'vlc'])
+                    talk('Closing VLC')
+                elif 'close tab' in command:
+                    subprocess.Popen(['pkill','chromium-browser'])
+                    talk('closing browser')
+                elif 'close file manager' in command:
+                    subprocess.Popen(['pkill','pcmanfm'])
+                    talk('closing file manager')
+                   
+             
+                else:
+                    talk('Please say the command again.')
+
+                return False
+
+            talk('How can I help you?')
+
+
+            while True:
+                command = take_command()
+                if command:
+                    if process_command(command):
+                        break
+
+
+
+
+    # Display the frame with rectangles and recognized names
+    cv2.imshow('Face Recognition', frame)
+
+    # Exit loop if 'ESC' or 'q' is pressed or COUNT_LIMIT is reached
+    key = cv2.waitKey(30) & 0xff
+    if key == 27 or key == 113:  # ESC or q
+        break
+
+    # Increment count
+    count += 1
+
+    # Take COUNT_LIMIT face samples and stop video capture
+    if count >= COUNT_LIMIT:
+        break
+
+# Release the camera and close all windows
+print("\n [INFO] Exiting Program and cleaning up stuff")
+cam.stop()
+cv2.destroyAllWindows()
